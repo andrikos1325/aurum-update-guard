@@ -1,0 +1,49 @@
+{# Aurum Update Guard macros - copy to /config/custom_templates/update_guard.jinja (built-in HA feature). MIT licence. #}
+{% macro ug_reasons() %}
+{%- set r = namespace(l=[]) -%}
+{%- set last = states('sensor.backup_last_successful_automatic_backup') -%}
+{%- set bad = ['unknown', 'unavailable', 'none', ''] -%}
+{%- if last in bad -%}
+  {%- set r.l = r.l + ['No successful automatic backup found - turn on automatic backups (Settings > System > Backups).'] -%}
+{%- elif as_timestamp(last, 0) < as_timestamp(now()) - 26 * 3600 -%}
+  {%- set r.l = r.l + ['Last successful automatic backup is older than 26 hours (' ~ relative_time(as_datetime(last)) ~ ' ago).'] -%}
+{%- endif -%}
+{%- set attempted = states('sensor.backup_last_attempted_automatic_backup') -%}
+{%- if attempted not in bad and last not in bad and as_timestamp(attempted, 0) > as_timestamp(last, 0) + 60 -%}
+  {%- set r.l = r.l + ['The LAST backup attempt FAILED (' ~ relative_time(as_datetime(attempted)) ~ ' ago) - check Settings > System > Backups.'] -%}
+{%- endif -%}
+{%- if states('sensor.backup_backup_manager_state') != 'idle' -%}
+  {%- set r.l = r.l + ['The backup system is busy or unavailable (' ~ states('sensor.backup_backup_manager_state') ~ ').'] -%}
+{%- endif -%}
+{%- set snap = states('sensor.update_guard_snapshot') -%}
+{%- if snap in bad or as_timestamp(snap, 0) < as_timestamp(now()) - 26 * 3600 -%}
+  {%- set r.l = r.l + ['No recent snapshot - press "Update Guard - take snapshot now" before updating.'] -%}
+{%- endif -%}
+{%- set p = ug_problems() | from_json -%}
+{%- if (p.missing_automations + p.missing_scripts + p.new_unavailable) | count > 0 -%}
+  {%- set r.l = r.l + ['Update Guard found problems since the snapshot - look at them first.'] -%}
+{%- endif -%}
+{{- r.l | to_json -}}
+{% endmacro %}
+
+{% macro ug_problems() %}
+{#- automations/scripts that existed at the snapshot and are now gone OR unavailable (HA keeps deleted/broken ones
+    as "unavailable"), shown by the name they had; plus other entities that became unavailable since then -#}
+{%- set ok_a = states.automation | rejectattr('state', 'eq', 'unavailable') | map(attribute='entity_id') | list -%}
+{%- set ok_s = states.script | rejectattr('state', 'eq', 'unavailable') | map(attribute='entity_id') | list -%}
+{%- set had_a = state_attr('sensor.update_guard_snapshot', 'automations') or {} -%}
+{%- set had_s = state_attr('sensor.update_guard_snapshot', 'scripts') or {} -%}
+{#- older snapshots stored plain lists of ids: accept both -#}
+{%- if had_a is not mapping -%}{%- set c = namespace(d={}) -%}{%- for e in had_a -%}{%- set c.d = dict(c.d, **{e: e}) -%}{%- endfor -%}{%- set had_a = c.d -%}{%- endif -%}
+{%- if had_s is not mapping -%}{%- set c = namespace(d={}) -%}{%- for e in had_s -%}{%- set c.d = dict(c.d, **{e: e}) -%}{%- endfor -%}{%- set had_s = c.d -%}{%- endif -%}
+{%- set ma = namespace(l=[]) -%}{%- set ms = namespace(l=[]) -%}
+{%- for eid, name in had_a.items() if eid not in ok_a -%}{%- set ma.l = ma.l + [name ~ ' (' ~ eid ~ ')'] -%}{%- endfor -%}
+{%- for eid, name in had_s.items() if eid not in ok_s -%}{%- set ms.l = ms.l + [name ~ ' (' ~ eid ~ ')'] -%}{%- endfor -%}
+{%- set before = state_attr('sensor.update_guard_snapshot', 'unavailable') or [] -%}
+{{- {
+  'missing_automations': ma.l,
+  'missing_scripts': ms.l,
+  'new_unavailable': (states | selectattr('state', 'eq', 'unavailable') | map(attribute='entity_id')
+                      | reject('match', 'update\\.|button\\.|event\\.|automation\\.|script\\.') | reject('in', before) | list | sort)[:50]
+} | to_json -}}
+{% endmacro %}

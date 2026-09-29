@@ -1,0 +1,129 @@
+# Aurum Update Guard (free core) - "is it safe to update Home Assistant?" and "did the update break anything?"
+# Built-in Home Assistant features only (template sensors, automations, helpers, backup sensors). No custom integration,
+# no HACS plugin, nothing loaded from the internet. MIT licence.
+# Install: copy this file to /config/packages/update_guard.yaml and update_guard.jinja to /config/custom_templates/,
+# make sure configuration.yaml has
+#   homeassistant:
+#     packages: !include_dir_named packages
+# then restart Home Assistant. Needs automatic backups turned on (Settings > System > Backups).
+# Needs Home Assistant 2025.2 or newer (backup sensors). Tested on 2026.9.4.
+
+input_button:
+  update_guard_snapshot:
+    name: Update Guard - take snapshot now
+    icon: mdi:camera-marker
+  update_guard_accept:
+    name: Update Guard - accept changes
+    icon: mdi:check-decagram
+
+input_number:
+  update_guard_settle_seconds:
+    name: Update Guard - wait after restart
+    min: 10
+    max: 1800
+    step: 10
+    initial: 300
+    unit_of_measurement: s
+    mode: box
+
+template:
+  # The snapshot: which automations/scripts exist and which entities are unavailable. Trigger-based template
+  # sensors keep their attributes across restarts, so the "before" state survives the update.
+  - triggers:
+      - trigger: time
+        at: "03:30:00"
+      - trigger: event
+        event_type: update_guard_take_snapshot
+      - trigger: state
+        entity_id: input_button.update_guard_accept
+      - trigger: state
+        entity_id: input_button.update_guard_snapshot
+    conditions:
+      # the nightly snapshot never overwrites a problem report you have not accepted yet
+      - condition: template
+        value_template: >-
+          {{ trigger.platform != 'time' or not is_state('binary_sensor.update_guard_problem', 'on') }}
+    sensor:
+      - name: Update Guard snapshot
+        unique_id: update_guard_snapshot
+        icon: mdi:shield-check-outline
+        device_class: timestamp
+        state: "{{ now().isoformat() }}"
+        attributes:
+          automations: >-
+            {% set ns = namespace(d={}) %}
+            {% for e in states.automation if e.state != 'unavailable' %}{% set ns.d = dict(ns.d, **{e.entity_id: e.name}) %}{% endfor %}
+            {{ ns.d }}
+          scripts: >-
+            {% set ns = namespace(d={}) %}
+            {% for e in states.script if e.state != 'unavailable' %}{% set ns.d = dict(ns.d, **{e.entity_id: e.name}) %}{% endfor %}
+            {{ ns.d }}
+          unavailable: >-
+            {{ states | selectattr('state', 'in', ['unavailable']) | map(attribute='entity_id')
+               | reject('match', 'update\.|button\.|event\.') | list | sort }}
+          entity_count: "{{ states | count }}"
+          ha_version: "{{ state_attr('update.home_assistant_core_update', 'installed_version') or 'unknown' }}"
+
+  - binary_sensor:
+      - name: Update Guard safe to update
+        unique_id: update_guard_safe_to_update
+        icon: mdi:shield-sync-outline
+        state: "{% from 'update_guard.jinja' import ug_reasons %}{{ (ug_reasons() | from_json) | count == 0 }}"
+        attributes:
+          reasons: "{% from 'update_guard.jinja' import ug_reasons %}{{ ug_reasons() | from_json }}"
+
+      # What went missing since the snapshot (checked after restarts; live any time)
+      - name: Update Guard problem
+        unique_id: update_guard_problem
+        icon: mdi:shield-alert-outline
+        device_class: problem
+        state: >-
+          {% from 'update_guard.jinja' import ug_problems %}{% set p = ug_problems() | from_json %}
+          {{ (p.missing_automations + p.missing_scripts + p.new_unavailable) | count > 0 }}
+        attributes:
+          missing_automations: "{% from 'update_guard.jinja' import ug_problems %}{{ (ug_problems() | from_json).missing_automations }}"
+          missing_scripts: "{% from 'update_guard.jinja' import ug_problems %}{{ (ug_problems() | from_json).missing_scripts }}"
+          new_unavailable: "{% from 'update_guard.jinja' import ug_problems %}{{ (ug_problems() | from_json).new_unavailable }}"
+
+automation:
+  - id: update_guard_after_restart
+    alias: Update Guard - check after restart
+    description: After every restart (updates included) wait until integrations have loaded, then report what went missing.
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - delay:
+          seconds: "{{ states('input_number.update_guard_settle_seconds') | int(300) }}"
+      - variables:
+          ma: "{{ state_attr('binary_sensor.update_guard_problem', 'missing_automations') or [] }}"
+          ms: "{{ state_attr('binary_sensor.update_guard_problem', 'missing_scripts') or [] }}"
+          nu: "{{ state_attr('binary_sensor.update_guard_problem', 'new_unavailable') or [] }}"
+          version_now: "{{ state_attr('update.home_assistant_core_update', 'installed_version') or 'unknown' }}"
+          version_before: "{{ state_attr('sensor.update_guard_snapshot', 'ha_version') or 'unknown' }}"
+      # for add-ons (the Pro package listens to this: phone message, report by device, last report)
+      - event: update_guard_report
+        event_data:
+          ok: "{{ (ma + ms + nu) | count == 0 }}"
+          version_before: "{{ version_before }}"
+          version_now: "{{ version_now }}"
+          missing_automations: "{{ ma }}"
+          missing_scripts: "{{ ms }}"
+          new_unavailable: "{{ nu }}"
+      - if:
+          - condition: template
+            value_template: "{{ (ma + ms + nu) | count > 0 }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: update_guard
+              title: "Update Guard: something changed after the restart"
+              message: >-
+                {% if version_before != version_now %}Home Assistant {{ version_before }} -> {{ version_now }}.{% endif %}
+                {% if ma %}**Automations missing or broken ({{ ma | count }}):** {{ ma | join(', ') }}. They are in your backup from before the update.
+                {% endif %}{% if ms %}**Scripts missing or broken ({{ ms | count }}):** {{ ms | join(', ') }}.
+                {% endif %}{% if nu %}**Newly unavailable ({{ nu | count }}):** {{ nu | join(', ') }}.
+                {% endif %}If this is expected, press "Update Guard - accept changes". The old snapshot is kept until then.
+        else:
+          - event: update_guard_take_snapshot
