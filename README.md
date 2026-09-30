@@ -4,7 +4,7 @@ Two questions before and after every Home Assistant update, answered by Home Ass
 **"Is it safe to update now?"** and **"Did the update break anything?"**
 
 Built only with Home Assistant's own features (template sensors, an automation, helpers and the built-in backup
-sensors): **no custom integration, no HACS plugin, nothing loaded from the internet** - so it keeps working after updates.
+sensors): **no custom integration, no frontend plugin, nothing loaded from the internet** - so it keeps working after updates.
 
 ## What it does
 - **`binary_sensor.update_guard_safe_to_update`** - `on` when your last automatic backup is less than 26 hours old,
@@ -25,14 +25,19 @@ sensors): **no custom integration, no HACS plugin, nothing loaded from the inter
 
 ## Install (5 minutes)
 1. Turn on **automatic backups** (Settings > System > Backups).
-2. Make sure `configuration.yaml` loads packages (add it once, then check the configuration):
+2. **The template macros:** with [HACS](https://hacs.xyz) (category "Template"), install **Aurum Update Guard** - HACS
+   puts `update_guard.jinja` into `/config/custom_templates/`. Without HACS: copy `update_guard.jinja` from this
+   repository to `/config/custom_templates/` (create the folder if needed).
+3. **The package** (HACS cannot install packages): make sure `configuration.yaml` loads packages (add it once, then
+   check the configuration):
    ```yaml
    homeassistant:
      packages: !include_dir_named packages
    ```
-3. Copy `packages/update_guard.yaml` to `/config/packages/` and `custom_templates/update_guard.jinja` to
-   `/config/custom_templates/` (create the folders if needed).
+   and copy `packages/update_guard.yaml` to `/config/packages/`.
 4. Restart Home Assistant. Add the two binary sensors to a dashboard, or use them in your own automations.
+
+(`custom_templates/update_guard.jinja` is the same file as `update_guard.jinja`, kept for older install links.)
 
 Requirements: Home Assistant 2025.2 or newer (backup sensors). Tested on 2026.9.4 in a separate test instance.
 Limits: Home Assistant cannot prove that a backup restores; checks that scan all entities refresh at most once a minute.

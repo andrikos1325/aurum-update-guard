@@ -1,0 +1,5 @@
+{
+  "name": "Aurum Update Guard",
+  "filename": "update_guard.jinja",
+  "homeassistant": "2025.2.0"
+}
