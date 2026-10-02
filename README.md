@@ -23,6 +23,14 @@ sensors): **no custom integration, no frontend plugin, nothing loaded from the i
 - **`binary_sensor.update_guard_problem`** - `on` while there are changes you have not accepted; press
   **"Update Guard - accept changes"** when a change was on purpose.
 
+- **Database too big? (new in 1.1)** - `sensor.update_guard_database_size` (MB, via Home Assistant's built-in SQL
+  integration - a tiny query, no table scan) and `binary_sensor.update_guard_database_too_big` (above 1500 MB by default;
+  change "Update Guard - database warning above"). While it is too big you get one notification a day with what helps:
+  keep less history (`purge_keep_days`), stop recording noisy entities (`recorder: exclude:`), shrink the file once
+  (`recorder.purge` with `repack: true`). The safe-to-update sensor shows it as a **note** (`notes` attribute) - not a
+  reason to wait, but updates that change the database take longer on big databases. Default query = SQLite (Home
+  Assistant's default); MariaDB/MySQL and PostgreSQL queries are in `update_guard.yaml`.
+
 ## Install (5 minutes)
 1. Turn on **automatic backups** (Settings > System > Backups).
 2. **The template macros:** with [HACS](https://hacs.xyz) (category "Template"), install **Aurum Update Guard** - HACS
@@ -39,7 +47,7 @@ sensors): **no custom integration, no frontend plugin, nothing loaded from the i
 
 (`custom_templates/update_guard.jinja` is the same file as `update_guard.jinja`, kept for older install links.)
 
-Requirements: Home Assistant 2025.2 or newer (backup sensors). Tested on 2026.9.4 in a separate test instance.
+Requirements: Home Assistant 2025.2 or newer (backup sensors). Tested on 2026.9.4 in a separate test instance (1.1: 36 function checks + 9 database checks).
 Limits: Home Assistant cannot prove that a backup restores; checks that scan all entities refresh at most once a minute.
 
 ## Pro edition

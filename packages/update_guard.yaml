@@ -25,6 +25,26 @@ input_number:
     initial: 300
     unit_of_measurement: s
     mode: box
+  update_guard_database_limit:
+    name: Update Guard - database warning above
+    min: 100
+    max: 50000
+    step: 100
+    initial: 1500
+    unit_of_measurement: MB
+    mode: box
+
+# Database size (built-in SQL integration, reads the recorder database; a tiny query, no table scan).
+# Default = SQLite (Home Assistant's default database). MariaDB/MySQL or PostgreSQL: replace the query with the matching line:
+#   MariaDB/MySQL: SELECT ROUND(SUM(data_length + index_length) / 1048576, 1) AS size_mb FROM information_schema.tables WHERE table_schema = DATABASE();
+#   PostgreSQL:    SELECT ROUND(pg_database_size(current_database()) / 1048576.0, 1) AS size_mb;
+sql:
+  - name: Update Guard database size
+    unique_id: update_guard_database_size
+    query: "SELECT ROUND(page_count * page_size / 1048576.0, 1) AS size_mb FROM pragma_page_count(), pragma_page_size();"
+    column: size_mb
+    unit_of_measurement: MB
+    icon: mdi:database
 
 template:
   # The snapshot: which automations/scripts exist and which entities are unavailable. Trigger-based template
@@ -71,6 +91,20 @@ template:
         state: "{% from 'update_guard.jinja' import ug_reasons %}{{ (ug_reasons() | from_json) | count == 0 }}"
         attributes:
           reasons: "{% from 'update_guard.jinja' import ug_reasons %}{{ ug_reasons() | from_json }}"
+          # good to know, but no reason to wait (e.g. a big database makes updates with a database migration slow)
+          notes: "{% from 'update_guard.jinja' import ug_notes %}{{ ug_notes() | from_json }}"
+
+      - name: Update Guard database too big
+        unique_id: update_guard_database_too_big
+        icon: mdi:database-alert-outline
+        device_class: problem
+        state: >-
+          {% set mb = states('sensor.update_guard_database_size') | float(-1) %}
+          {{ mb > states('input_number.update_guard_database_limit') | float(1500) }}
+        attributes:
+          size_mb: "{{ states('sensor.update_guard_database_size') | float(-1) }}"
+          limit_mb: "{{ states('input_number.update_guard_database_limit') | float(1500) }}"
+          advice: "{% from 'update_guard.jinja' import ug_db_advice %}{{ ug_db_advice() }}"
 
       # What went missing since the snapshot (checked after restarts; live any time)
       - name: Update Guard problem
@@ -86,6 +120,29 @@ template:
           new_unavailable: "{% from 'update_guard.jinja' import ug_problems %}{{ (ug_problems() | from_json).new_unavailable }}"
 
 automation:
+  - id: update_guard_database_check
+    alias: Update Guard - database too big (daily)
+    description: Once a day, a notification while the database is above the warning size - with what to do about it.
+    mode: single
+    triggers:
+      - trigger: time
+        at: "09:00:00"
+    actions:
+      - if:
+          - condition: state
+            entity_id: binary_sensor.update_guard_database_too_big
+            state: "on"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: update_guard_database
+              title: "Update Guard: your database is {{ states('sensor.update_guard_database_size') | float(0) | round(0) | int }} MB"
+              message: "{% from 'update_guard.jinja' import ug_db_advice %}{{ ug_db_advice() }}"
+        else:
+          - action: persistent_notification.dismiss
+            data:
+              notification_id: update_guard_database
+
   - id: update_guard_after_restart
     alias: Update Guard - check after restart
     description: After every restart (updates included) wait until integrations have loaded, then report what went missing.

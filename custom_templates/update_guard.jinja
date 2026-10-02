@@ -47,3 +47,19 @@
                       | reject('match', 'update\\.|button\\.|event\\.|automation\\.|script\\.') | reject('in', before) | list | sort)[:50]
 } | to_json -}}
 {% endmacro %}
+
+{% macro ug_notes() %}
+{#- good to know before an update, but not a reason to wait -#}
+{%- set r = namespace(l=[]) -%}
+{%- if is_state('binary_sensor.update_guard_database_too_big', 'on') -%}
+  {%- set r.l = r.l + ['Your database is ' ~ (states('sensor.update_guard_database_size') | float(0) | round(0) | int) ~ ' MB - updates that change the database can take a long time (do not restart during them). See "Update Guard database too big".'] -%}
+{%- endif -%}
+{{- r.l | to_json -}}
+{% endmacro %}
+
+{% macro ug_db_advice() %}
+{%- set mb = states('sensor.update_guard_database_size') | float(-1) -%}
+{%- if mb < 0 -%}Database size unknown - check that the "Update Guard database size" sensor works (MariaDB/PostgreSQL: use the query for your database from update_guard.yaml).
+{%- else -%}Your Home Assistant database is {{ mb | round(0) | int }} MB (warning above {{ states('input_number.update_guard_database_limit') | float(1500) | round(0) | int }} MB). A big database makes Home Assistant slower, backups bigger, and updates that change the database can take a long time. What helps: 1) keep less history - in configuration.yaml under recorder: set purge_keep_days (default 10, e.g. 7); 2) stop recording noisy entities you never look at (recorder: exclude:, e.g. power/energy sensors that update every few seconds) - the History page shows which entities change most; 3) shrink the file once: run the action recorder.purge with repack: true (needs free disk space about the size of the database; Home Assistant is slow while it runs).
+{%- endif -%}
+{% endmacro %}
