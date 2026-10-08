@@ -51,7 +51,7 @@ Requirements: Home Assistant 2025.2 or newer (backup sensors). Tested on 2026.9.
 Limits: Home Assistant cannot prove that a backup restores; checks that scan all entities refresh at most once a minute.
 
 ## Pro edition
-**[Aurum Update Guard Pro](https://antrikos.gumroad.com/l/aurum-update-guard)** (EUR 5, also
+**[Aurum Update Guard Pro](https://localhavenstore.gumroad.com/l/aurum-update-guard)** (EUR 5, also
 [on Etsy](https://www.etsy.com/listing/4584935364)) adds:
 - a **"Prepare update"** button - fresh automatic backup + new snapshot, then READY / not ready (refuses while
   problems are open),
